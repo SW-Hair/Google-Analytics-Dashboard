@@ -2,11 +2,14 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const fs = require('fs'); 
-const path = require('path');  
+const path = require('path');  
 const session = require('express-session'); 
 const bcrypt = require('bcrypt'); 
 const validator = require('validator');  
 const cookieParser = require('cookie-parser'); 
+const passport = require('passport');
+const GoogleStrategy = require('passport-google-oauth20').Strategy; 
+const { google } = require('googleapis');
 
 const app = express();
 const port = 3000;
@@ -31,27 +34,59 @@ app.use(session({
     saveUninitialized: false,  
 }));
 
+// OAuth Setup (Passport.js)
+const config = require('./config'); // Import your config file
+
+passport.use(new GoogleStrategy({
+    clientID: config.google.clientId,
+    clientSecret: config.google.clientSecret,
+    callbackURL: 'http://localhost:3000/auth/callback' 
+  },
+  (accessToken, refreshToken, profile, done) => {
+    console.log('Access Token:', accessToken);
+    return done(null, { profile, accessToken }); // Pass accessToken along for later use
+  }
+));
+
+passport.serializeUser((user, done) => done(null, user));
+passport.deserializeUser((user, done) => done(null, user)); 
+
+app.use(passport.initialize());
+app.use(passport.session());
+
+// Authentication Routes
+app.get('/auth/google', 
+  passport.authenticate('google', { scope: ['https://www.googleapis.com/auth/analytics.readonly'] })
+);
+
+app.get('/auth/callback', 
+    passport.authenticate('google', { failureRedirect: '/' }), // Adjust redirect URLs as needed
+    (req, res) => {
+        res.redirect('/dashboard'); // Replace '/dashboard' with correct dashboard route
+    }
+);
+
 // Simulated login endpoint
 app.post('/login', async (req, res) => {
-    const username = validator.escape(req.body.username); // Sanitization
-    const password = validator.escape(req.body.password); // Sanitization 
+    const username = validator.escape(req.body.username); // Sanitization
+    const password = validator.escape(req.body.password); // Sanitization 
 
-    console.log('Login attempt with username:', username); 
+    console.log('Login attempt with username:', username); 
 
-    const user = db.users.find(user => user.username === username);
+    const user = db.users.find(user => user.username === username);
 
-    if (user && await bcrypt.compare(password, user.password)) { 
-        // Successful login
-        const sessionId = generateSecureSessionId(); 
-        res.cookie('sessionId', sessionId, { 
-            httpOnly: true,  
-            secure: true,   
-            maxAge: 3600000 // Example: 1 hour 
-        });  
-        res.send('Login successful!'); 
-    } else {
-        res.status(401).send('Invalid credentials'); 
-    }
+    if (user && await bcrypt.compare(password, user.password)) { 
+        // Successful login
+        const sessionId = generateSecureSessionId(); 
+        res.cookie('sessionId', sessionId, { 
+            httpOnly: true,  
+            secure: true,   
+            maxAge: 3600000 // Example: 1 hour 
+        });  
+        res.send('Login successful!'); 
+    } else {
+        res.status(401).send('Invalid credentials'); 
+    }
 });
 
 // Logout endpoint
@@ -63,54 +98,24 @@ app.post('/logout', (req, res) => {
 
 // Registration endpoint (NEW)
 app.post('/register', async (req, res) => {
-    const username = validator.escape(req.body.username); // Sanitization
-    const password = validator.escape(req.body.password); // Sanitization
-
-    // Password Validation
-    const minPasswordLength = 8;
-    if (password.length < minPasswordLength) {
-        res.status(400).send(`Password must be at least ${minPasswordLength} characters long`);
-        return; 
-    }
-
-    // Hash the password
-    const saltRounds = 10; 
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
-
-    if (db.users.find(user => user.username === username)) {
-        res.status(400).send('Username already exists');
-    } else {
-        const newUser = { id: Date.now(), username, password: hashedPassword }; 
-        db.users.push(newUser);
-        saveData(); 
-        res.send('Registration successful!');
-    }
+    // ... (Your existing register endpoint code)
 });
 
 // Middleware for checking sessions (Illustrative)
 app.use((req, res, next) => {
-    const sessionId = req.cookies.sessionId;
-    if (sessionId && db.users.find(user => user.id === sessionId)) {
-      req.userId = sessionId;
-    } 
-    next(); 
+    // ... (Your existing middleware code)
+});
+
+// A Simple Route to Test API Access
+app.get('/test-api', passport.authenticate('google'), async (req, res) => {
+   // ... (Google Analytics API fetching code)
 });
 
 // Save data to file on server shutdown
 process.on('SIGINT', saveData);
 process.on('SIGTERM', saveData);
 
-function saveData() {
-    fs.writeFileSync(dbFile, JSON.stringify(db));
-    console.log('Data saved to db.json');
-}
-
-// Helper function to generate secure session IDs (Example)
-function generateSecureSessionId() {
-    // For production, use a more robust session ID generation library
-    return Date.now().toString(); 
-}
-
+// ... (Rest of your server.js code)
 
 app.listen(port, () => {
   console.log(`Server listening on port ${port}`);
